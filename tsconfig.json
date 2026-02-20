@@ -30,7 +30,8 @@
     // ── Safety ────────────────────────────────────────────────────────────
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": ["node", "jest"]
   },
   // Covers both source and tests for typecheck + IDE support
   "include": ["src/**/*.ts", "tests/**/*.ts"],
