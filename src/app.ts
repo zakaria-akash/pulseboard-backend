@@ -28,6 +28,7 @@
  *                  mount /api/v1 router with all module sub-routers
  */
 import express, { type Application, type Request, type Response, type NextFunction } from 'express';
+import mongoose from 'mongoose';
 
 // ── App instance ───────────────────────────────────────────────────────────
 // `express()` returns an Application — a thin wrapper around Node's
@@ -67,10 +68,21 @@ app.get('/healthz', (_req: Request, res: Response) => {
  * Orchestrators stop routing traffic to the pod while this returns non-200,
  * giving the DB connection time to establish on cold start.
  *
- * Currently returns 200 with db: 'pending' (no DB yet in Phase 0).
+ * Phase 1: performs a real Mongoose readyState check:
+ *   readyState === 1  →  200 { status: 'ok',  db: 'connected' }
+ *   otherwise         →  503 { status: 'fail', db: 'disconnected' }
+ *
+ * Mongoose readyState values:
+ *   0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
  */
 app.get('/readyz', (_req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', db: 'pending', timestamp: new Date().toISOString() });
+  const isConnected = mongoose.connection.readyState === 1;
+
+  if (isConnected) {
+    res.status(200).json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
+  } else {
+    res.status(503).json({ status: 'fail', db: 'disconnected', timestamp: new Date().toISOString() });
+  }
 });
 
 // ── Root info ──────────────────────────────────────────────────────────────
@@ -85,8 +97,8 @@ app.get('/', (_req: Request, res: Response) => {
   res.status(200).json({
     name: 'PulseBoard API',
     version: '1.0.0',
-    phase: 0,
-    note: 'Toolchain bootstrap — no domain logic yet',
+    phase: 1,
+    note: 'Config layer — typed env, pino logger, MongoDB connection',
   });
 });
 
