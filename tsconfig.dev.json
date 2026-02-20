@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Override Node16 → CommonJS so ts-node-dev resolves relative
+    // imports without explicit .js extensions at runtime.
+    "module": "CommonJS",
+    "moduleResolution": "node10"
+  },
+  "ts-node": {
+    "transpileOnly": true
+  }
+}

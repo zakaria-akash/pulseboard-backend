@@ -32,8 +32,8 @@
  */
 
 import mongoose from 'mongoose';
-import { env } from './env.js';
-import logger from './logger.js';
+import { env } from './env';
+import logger from './logger';
 
 // ── Mongoose global settings ───────────────────────────────────────────────
 // Set before the first connection attempt.

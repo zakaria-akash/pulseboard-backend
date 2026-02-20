@@ -190,6 +190,8 @@ export async function exportIncidents(
 
     try {
       for await (const rawDoc of cursor) {
+        // Stop writing if the client disconnected mid-download.
+        if (res.writableEnded) break;
         const doc = rawDoc as unknown as PopulatedExportDoc;
         const checkName = doc.checkId?.name ?? '';
         const row = [
@@ -209,7 +211,7 @@ export async function exportIncidents(
     }
 
     // ── Phase 3: End the response ──────────────────────────────────────────
-    res.end();
+    if (!res.writableEnded) res.end();
   } catch (err) {
     next(err);
   }

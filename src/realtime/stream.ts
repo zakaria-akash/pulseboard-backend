@@ -106,6 +106,8 @@ export async function streamTimeline(req: Request, res: Response): Promise<void>
 
   try {
     for await (const doc of auditCursor(tenantId, id)) {
+      // Stop streaming if the client disconnected mid-flight.
+      if (res.writableEnded) break;
       // Comma-separate entries; no trailing comma.
       if (!first) res.write(',');
       first = false;
@@ -117,6 +119,8 @@ export async function streamTimeline(req: Request, res: Response): Promise<void>
   }
 
   // Phase 3: close the JSON array and end the response.
-  res.write(']}');
-  res.end();
+  if (!res.writableEnded) {
+    res.write(']}');
+    res.end();
+  }
 }

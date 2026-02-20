@@ -34,5 +34,18 @@
   },
   // Covers both source and tests for typecheck + IDE support
   "include": ["src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "dist", "coverage"]
+  "exclude": ["node_modules", "dist", "coverage"],
+
+  // ── ts-node / ts-node-dev override ────────────────────────────────────────
+  // ts-node runs in CJS mode and cannot resolve ".js" → ".ts" under Node16.
+  // These compiler options apply ONLY at runtime (ts-node-dev / ts-node) and
+  // are completely ignored by tsc, so type-checking and production builds are
+  // unaffected. CommonJS + node moduleResolution is the right pair for CJS dev.
+  "ts-node": {
+    "transpileOnly": true,
+    "compilerOptions": {
+      "module": "CommonJS",
+      "moduleResolution": "node"
+    }
+  }
 }

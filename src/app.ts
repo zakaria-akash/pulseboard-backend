@@ -41,6 +41,7 @@ import mongoose from 'mongoose';
 
 import { env } from './config/env';
 import { requestId } from './common/middleware/requestId';
+import { requestLogger } from './common/middleware/requestLogger';
 import { globalLimiter, authLimiter, usageLimiter } from './common/middleware/rateLimit';
 import { errorHandler } from './common/middleware/errorHandler';
 
@@ -59,6 +60,12 @@ const app: Application = express();
 // Must be first so req.requestId is available in every subsequent middleware,
 // route handler, and the error handler.
 app.use(requestId);
+
+// ── 2a. Request logger ────────────────────────────────────────────────────────
+// Registered immediately after requestId so req.requestId is already set.
+// Attaches a res.on('finish') listener that logs the structured access line
+// and feeds the duration into the p50/p95 rolling window.
+app.use(requestLogger);
 
 // ── 2. Helmet — security headers ─────────────────────────────────────────────
 // Sets a suite of HTTP response headers that harden the app against common

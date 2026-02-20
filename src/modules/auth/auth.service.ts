@@ -177,7 +177,14 @@ export async function login(dto: LoginDto): Promise<{ token: string; user: UserP
       tenantId: userWithHash.tenantId.toString(),
     },
     env.JWT_SECRET,
-    { expiresIn: ttlToSeconds(env.JWT_TTL) },
+    {
+      expiresIn: ttlToSeconds(env.JWT_TTL),
+      // iss and aud allow jwt.verify() to reject tokens issued by a different
+      // service or intended for a different audience (e.g. a mobile app token
+      // must not be accepted as a backend API token).
+      issuer: 'pulseboard',
+      audience: 'pulseboard-api',
+    },
   );
 
   // 4. Return token + safe user (hash was fetched but must not be returned).

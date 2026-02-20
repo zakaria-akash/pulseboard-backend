@@ -23,11 +23,18 @@
  *   The compression middleware buffers output; calling the `flush()` shim
  *   (added by `compression`) after each write ensures events reach the client
  *   without batching delay.
+ *   A `res.writableEnded` guard in the heartbeat and handler prevents writes
+ *   to a socket that is already being torn down.
  *
  * ── Cleanup ───────────────────────────────────────────────────────────────────
  *   When the client disconnects (tab closed, navigation away, network drop)
  *   the `req` 'close' event fires. The handler clears the heartbeat interval
  *   and unsubscribes from the pubsub channel to prevent memory leaks.
+ *
+ * ── Graceful shutdown ─────────────────────────────────────────────────────────
+ *   All active SSE responses are tracked in `activeSseConnections`. During
+ *   application shutdown, `terminateAllSse()` calls `res.end()` on every open
+ *   connection so `http.Server.close()` can drain without hanging.
  */
 
 import type { Request, Response } from 'express';
@@ -36,8 +43,28 @@ import logger from '../config/logger';
 
 const HEARTBEAT_INTERVAL_MS = 20_000;
 
+// ── Active connection registry ─────────────────────────────────────────────────
+// Tracks every open SSE response so that `terminateAllSse()` can end them all
+// during graceful shutdown, allowing `server.close()` to drain promptly.
+const activeSseConnections = new Set<Response>();
+
+/**
+ * Ends every active SSE connection.
+ * Call this during graceful shutdown before `server.close()` so that
+ * long-lived SSE sockets do not prevent the HTTP server from draining.
+ */
+export function terminateAllSse(): void {
+  for (const res of activeSseConnections) {
+    if (!res.writableEnded) res.end();
+  }
+  activeSseConnections.clear();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 /** Writes one SSE data event and flushes compression buffering. */
 function sseWrite(res: Response, data: unknown): void {
+  if (res.writableEnded) return;
   res.write(`data: ${JSON.stringify(data)}\n\n`);
   // The `compression` middleware adds a `.flush()` method.
   if (typeof (res as { flush?: () => void }).flush === 'function') {
@@ -47,11 +74,14 @@ function sseWrite(res: Response, data: unknown): void {
 
 /** Writes a keep-alive SSE comment (browsers silently ignore comments). */
 function sseKeepAlive(res: Response): void {
+  if (res.writableEnded) return;
   res.write(':\n\n');
   if (typeof (res as { flush?: () => void }).flush === 'function') {
     (res as { flush: () => void }).flush();
   }
 }
+
+// ── Handler ───────────────────────────────────────────────────────────────────
 
 /**
  * Express handler: opens an SSE stream for all incident lifecycle events
@@ -77,6 +107,9 @@ export function incidentSSE(req: Request, res: Response): void {
   res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx proxy buffering
   res.flushHeaders();
 
+  // Register in the active-connection set for graceful shutdown.
+  activeSseConnections.add(res);
+
   logger.debug({ tenantId }, '[SSE] Client connected');
 
   const channel = `incidents:${tenantId}`;
@@ -88,14 +121,20 @@ export function incidentSSE(req: Request, res: Response): void {
   subscribe(channel, handler);
 
   // Periodic keep-alive to prevent idle-connection timeout.
+  // The writableEnded guard inside sseKeepAlive prevents writes after shutdown.
   const heartbeat = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(heartbeat);
+      return;
+    }
     sseKeepAlive(res);
   }, HEARTBEAT_INTERVAL_MS);
 
   req.on('close', () => {
     clearInterval(heartbeat);
+    activeSseConnections.delete(res);
     unsubscribe(channel, handler);
-    res.end();
+    if (!res.writableEnded) res.end();
     logger.debug({ tenantId }, '[SSE] Client disconnected');
   });
 }

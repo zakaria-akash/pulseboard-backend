@@ -34,7 +34,7 @@
  */
 
 import pino from 'pino';
-import { env } from './env.js';
+import { env } from './env';
 
 // ── Transport ──────────────────────────────────────────────────────────────
 // pino-pretty is only used in non-production environments.

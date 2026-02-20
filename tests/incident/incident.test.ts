@@ -29,6 +29,8 @@ let stopSubscriptions: () => void;
 function makeToken(userId: string, tenantId: string, role = 'owner'): string {
   return jwt.sign({ sub: userId, email: 'test@example.com', role, tenantId }, env.JWT_SECRET, {
     expiresIn: 3600,
+    issuer: 'pulseboard',
+    audience: 'pulseboard-api',
   });
 }
 

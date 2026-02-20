@@ -105,9 +105,12 @@ export function authGuard(minRole?: Role) {
         throw new UnauthorizedError('No authentication token provided');
       }
 
-      // jwt.verify throws on invalid signature, expiry, or malformed token.
-      // We cast because we control the signing shape in auth.service.ts.
-      const payload = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+      // jwt.verify throws on invalid signature, expiry, malformed token, or
+      // mismatched iss/aud claims — all wrapped as a generic 401 below.
+      const payload = jwt.verify(token, env.JWT_SECRET, {
+        issuer: 'pulseboard',
+        audience: 'pulseboard-api',
+      }) as JwtPayload;
 
       // Attach the decoded payload to the request so downstream handlers can
       // read req.user.sub, req.user.tenantId, etc. without re-decoding the JWT.

@@ -56,6 +56,18 @@ type LiveSocket = WebSocket & { isAlive: boolean };
 
 const PING_INTERVAL_MS = 30_000;
 
+/**
+ * Maximum number of bytes allowed to sit in a socket's send buffer before we
+ * start dropping outbound messages for that client. A client that isn't reading
+ * fast enough (slow connection, suspended tab) would otherwise cause us to
+ * queue an unbounded amount of data in memory.
+ *
+ * 64 KiB is a reasonable ceiling: large enough to absorb a burst of events
+ * during a degraded connection, small enough to prevent memory exhaustion when
+ * dozens of slow clients are connected simultaneously.
+ */
+const WS_BUFFER_LIMIT = 64 * 1024; // 64 KiB
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -77,9 +89,14 @@ export function attachWS(httpServer: Server): WsController {
     if (!room) return;
     const message = JSON.stringify(payload);
     for (const socket of room) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(message);
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      // Backpressure guard: if the client's send buffer is too full, drop the
+      // message for this socket rather than queuing more data in memory.
+      if (socket.bufferedAmount > WS_BUFFER_LIMIT) {
+        logger.warn({ tenantId }, '[WS] Socket backpressure — dropping message for slow client');
+        continue;
       }
+      socket.send(message);
     }
   }
 

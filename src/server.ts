@@ -49,6 +49,7 @@ import { env } from './config/env';
 import logger from './config/logger';
 import { connectDB, disconnectDB } from './config/db';
 import { attachWS, type WsController } from './realtime/ws';
+import { terminateAllSse } from './realtime/sse';
 import { startScheduler } from './scheduler';
 import { initIncidentSubscriptions } from './modules/incident/incident.service';
 
@@ -94,6 +95,12 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, 10_000).unref(); // .unref() so the timer doesn't prevent the clean exit path
 
+  // Terminate all open SSE responses before closing the HTTP server.
+  // Without this, server.close() would wait indefinitely for SSE keep-alive
+  // connections to close on their own, and the 10 s hard-kill would fire.
+  terminateAllSse();
+  logger.info('[PulseBoard] SSE connections terminated');
+
   server.close(async () => {
     clearTimeout(killTimer);
 
@@ -109,7 +116,6 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('[PulseBoard] Incident subscriptions stopped');
 
     // Close WebSocket connections, sending close frames to all connected clients.
-    // Phase 11 will make this asynchronous; for now the stub is a no-op.
     wsController?.close();
     logger.info('[PulseBoard] WebSocket server closed');
 
@@ -119,6 +125,10 @@ async function shutdown(signal: string): Promise<void> {
     logger.info('[PulseBoard] Shutdown complete. Bye.');
     process.exit(0);
   });
+
+  // Force-close any remaining HTTP keep-alive connections (e.g. long-polling
+  // clients, health-check agents) that would otherwise block server.close().
+  server.closeAllConnections();
 }
 
 // Docker / Kubernetes send SIGTERM when stopping a container.
@@ -191,7 +201,7 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
     logger.info(`  Healthz  →  http://localhost:${env.PORT}/healthz`);
     logger.info(`  Readyz   →  http://localhost:${env.PORT}/readyz`);
     logger.info(`  Env      →  ${env.NODE_ENV}`);
-    logger.info(`  Phase    →  11 (usage + realtime WS/SSE/stream)`);
+    logger.info(`  Phase    →  15 (hardening, CI gates)`);
     logger.info('');
   });
 })();
