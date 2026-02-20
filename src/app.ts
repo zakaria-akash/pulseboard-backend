@@ -81,7 +81,9 @@ app.get('/readyz', (_req: Request, res: Response) => {
   if (isConnected) {
     res.status(200).json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
   } else {
-    res.status(503).json({ status: 'fail', db: 'disconnected', timestamp: new Date().toISOString() });
+    res
+      .status(503)
+      .json({ status: 'fail', db: 'disconnected', timestamp: new Date().toISOString() });
   }
 });
 
@@ -124,7 +126,7 @@ app.use((_req: Request, res: Response) => {
  *  - Logs 500s with the pino logger + requestId for tracing
  *  - Always responds with the standard { error: { code, message, details? } } envelope
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' } });
