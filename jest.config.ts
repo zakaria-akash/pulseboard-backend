@@ -23,7 +23,7 @@ const config: Config = {
     '!src/types/**',
     '!src/server.ts', // entry point — covered by integration
   ],
-  coverageThresholds: {
+  coverageThreshold: {
     global: { lines: 70, functions: 70, branches: 60, statements: 70 },
   },
 
