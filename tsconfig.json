@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    // ── Language ──────────────────────────────────────────────────────────
+    "target": "ES2022",
+    // "Node16" is the required pair for "moduleResolution": "node16".
+    // Because package.json has no "type": "module", Node treats every
+    // .ts/.js file as CommonJS — output is identical to "CommonJS".
+    "module": "Node16",
+    "lib": ["ES2022"],
+
+    // ── Strictness ────────────────────────────────────────────────────────
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // ── Module resolution ─────────────────────────────────────────────────
+    // "node" (node10) is deprecated since TS 5.x and removed in TS 7.0.
+    // "node16" correctly models Node.js 16+ CJS resolution — the direct
+    // modern replacement for CommonJS projects.
+    "moduleResolution": "node16",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+
+    // ── Emit — disabled here; production build uses tsconfig.build.json ──
+    "noEmit": true,
+
+    // ── Safety ────────────────────────────────────────────────────────────
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true
+  },
+  // Covers both source and tests for typecheck + IDE support
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

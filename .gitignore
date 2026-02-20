@@ -1,0 +1,301 @@
+# =============================================================================
+# PulseBoard Backend — .gitignore
+# Node.js · TypeScript · Express · MongoDB · npm
+# =============================================================================
+
+
+# =============================================================================
+# ENVIRONMENT & SECRETS
+# =============================================================================
+.env
+.env.*
+!.env.example
+!.env.test.example
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+secrets/
+.secrets/
+
+
+# =============================================================================
+# DEPENDENCIES
+# =============================================================================
+node_modules/
+.pnp
+.pnp.js
+.pnp.cjs
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+
+# =============================================================================
+# BUILD OUTPUT
+# =============================================================================
+dist/
+build/
+out/
+*.js.map
+*.d.ts.map
+
+
+# =============================================================================
+# TYPESCRIPT
+# =============================================================================
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+
+# =============================================================================
+# TEST & COVERAGE
+# =============================================================================
+coverage/
+.nyc_output/
+*.lcov
+test-results/
+junit.xml
+
+
+# =============================================================================
+# LOGS
+# =============================================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+
+# =============================================================================
+# RUNTIME & PROCESS
+# =============================================================================
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+
+# =============================================================================
+# CACHE
+# =============================================================================
+.npm/
+.eslintcache
+.stylelintcache
+.prettiercache
+.cache/
+.parcel-cache/
+.turbo/
+.rollup.cache/
+.swc/
+
+
+# =============================================================================
+# OS GENERATED
+# =============================================================================
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Windows reserved device names — Git cannot index these on Windows
+# because the OS intercepts them before the filesystem sees them.
+# (nul = null device, equivalent to /dev/null on Unix)
+nul
+nul.txt
+con
+prn
+aux
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+
+# =============================================================================
+# EDITORS & IDEs
+# =============================================================================
+
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# JetBrains (WebStorm, IntelliJ, Rider, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea_modules/
+
+# Vim / Neovim
+*.swp
+*.swo
+*.swn
+*~
+.vim/
+Session.vim
+.netrwhist
+
+# Emacs
+*#
+.#*
+\#*#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Atom
+.atom/
+
+# Eclipse
+.classpath
+.project
+.settings/
+.loadpath
+
+# NetBeans
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+
+# =============================================================================
+# AI AGENTS & CODING ASSISTANTS
+# =============================================================================
+
+# Anthropic Claude (Claude Code / claude.ai)
+.claude/
+
+# Google Gemini / Gemini CLI
+.gemini/
+.gemini_history
+gemini_history
+
+# GitHub Copilot
+.github/copilot-instructions.md
+.copilot/
+
+# Cursor AI editor
+.cursor/
+.cursorignore
+.cursorindexingignore
+
+# Windsurf / Codeium
+.codeium/
+.windsurf/
+
+# Tabnine
+.tabnine/
+
+# Sourcegraph Cody
+.cody/
+
+# Aider (AI pair programming)
+.aider*
+aider.conf.yml
+
+# Continue.dev
+.continue/
+
+# Replit AI
+.replit
+replit.nix
+
+# Devin AI
+.devin/
+
+# Amazon CodeWhisperer / Q
+.aws/codewhisperer/
+
+# OpenAI Codex / ChatGPT integrations
+.openai/
+
+# Supermaven
+.supermaven/
+
+# Zed AI
+.zed/
+
+
+# =============================================================================
+# PACKAGE MANAGER LOCKS (keep only what you use)
+# =============================================================================
+# Using npm — keep package-lock.json, ignore others:
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+
+
+# =============================================================================
+# DOCKER & CONTAINERS
+# =============================================================================
+.docker/
+docker-compose.override.yml
+*.dockerignore
+
+
+# =============================================================================
+# DATABASES & LOCAL DATA
+# =============================================================================
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+data/
+.data/
+mongo-data/
+redis-data/
+
+
+# =============================================================================
+# MISCELLANEOUS
+# =============================================================================
+*.gz
+*.tar
+*.zip
+*.tgz
+tmp/
+temp/
+.tmp/
+.temp/
+scratch/
+sandbox/
+playground/
