@@ -41,7 +41,7 @@ import mongoose from 'mongoose';
 
 import { env } from './config/env';
 import { requestId } from './common/middleware/requestId';
-import { globalLimiter, authLimiter } from './common/middleware/rateLimit';
+import { globalLimiter, authLimiter, usageLimiter } from './common/middleware/rateLimit';
 import { errorHandler } from './common/middleware/errorHandler';
 
 // ── Module routers (mounted as implemented) ───────────────────────────────────
@@ -50,6 +50,7 @@ import tenantRouter from './modules/tenant/tenant.routes'; // Phase 5
 import checkRouter from './modules/check/check.routes'; // Phase 6
 import incidentRouter from './modules/incident/incident.routes'; // Phase 8
 import auditRouter from './modules/audit/audit.routes'; // Phase 9
+import usageRouter from './modules/usage/usage.routes'; // Phase 10
 
 // ── App instance ─────────────────────────────────────────────────────────────
 const app: Application = express();
@@ -198,7 +199,8 @@ apiRouter.use('/incidents', incidentRouter);
 // Phase 9 — Audit: admin-only; authGuard applied per-route
 apiRouter.use('/audit', auditRouter);
 
-// Phase 10 → usageRouter at /usage
+// Phase 10 — Usage: usageLimiter applied here; authGuard + idempotency guard per-route
+apiRouter.use('/usage', usageLimiter, usageRouter);
 
 app.use('/api/v1', apiRouter);
 

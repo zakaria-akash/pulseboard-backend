@@ -65,6 +65,13 @@ declare global {
        * can be traced end-to-end across log aggregators.
        */
       requestId: string;
+
+      /**
+       * Idempotency key extracted from the `Idempotency-Key` request header
+       * by `requireIdempotencyKey` middleware. Only present on usage ingestion
+       * routes — accessing it on other routes will be `undefined` at runtime.
+       */
+      idempotencyKey: string;
     }
   }
 }

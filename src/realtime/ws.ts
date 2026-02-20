@@ -1,54 +1,192 @@
 /**
- * src/realtime/ws.ts — WebSocket Server (stub)
+ * src/realtime/ws.ts — WebSocket Server
  *
- * Full implementation is in Phase 11. This stub exports the `attachWS`
- * function signature so that `server.ts` can import and call it from
- * Phase 3 onwards. The returned `WsController` interface is also used by
- * the graceful-shutdown handler to close all WebSocket connections before
- * the process exits.
+ * Attaches a WebSocket server to the existing http.Server so that HTTP and WS
+ * traffic share a single TCP port. Clients connect with:
  *
- * ── Phase 11 will implement ───────────────────────────────────────────────
- *   - Tenant-scoped rooms via `Map<tenantId, Set<WebSocket>>`
- *   - Ping/pong heartbeat every 30 s to detect dead connections
- *   - Subscribe to `incidents:{tenantId}` pubsub channel and forward events
- *     to every WebSocket in the corresponding room
- *   - `broadcast(tenantId, payload)` for pushing incident updates to clients
+ *   ws://host:port/ws?tenantId=<objectId>
+ *
+ * ── Rooms ─────────────────────────────────────────────────────────────────────
+ *   Each tenant has a "room" — a `Set<WebSocket>` stored in a `Map` keyed by
+ *   tenantId. Incoming incident lifecycle events are broadcast to every client
+ *   in the corresponding room.
+ *
+ * ── Ping / pong heartbeat ─────────────────────────────────────────────────────
+ *   TCP connections can silently drop (NAT timeout, proxy idle timeout, mobile
+ *   network switch). The server sends a `ping` frame every 30 s. If a client
+ *   has not replied with a `pong` before the next ping cycle it is considered
+ *   dead and terminated. This prevents rooms from accumulating zombie sockets.
+ *
+ *   Each socket gets an `isAlive` flag. The heartbeat sets it to false then
+ *   pings; if still false on the next cycle the socket is terminated.
+ *
+ * ── Pub/sub integration ───────────────────────────────────────────────────────
+ *   The first client to join a tenant room creates a pubsub subscription on
+ *   `incidents:{tenantId}`. The subscription is torn down when the last client
+ *   in the room disconnects, preventing memory leaks.
+ *
+ * ── Graceful shutdown ─────────────────────────────────────────────────────────
+ *   `WsController.close()` terminates all sockets, clears the heartbeat
+ *   interval, removes all pubsub subscriptions, and closes the WS server.
+ *
+ * ── Security note ─────────────────────────────────────────────────────────────
+ *   `tenantId` is taken from the URL query string without JWT verification.
+ *   For production, add token verification in the `upgrade` event handler.
  */
 
+import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
+import { subscribe, unsubscribe, type PubSubHandler } from './pubsub';
+import logger from '../config/logger';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 /**
- * Handle returned by `attachWS`. Provides the two operations `server.ts`
- * needs without exposing the raw `WebSocketServer` instance:
- *
- *  - `broadcast`  — push a JSON payload to all clients in a tenant room.
- *  - `close`      — gracefully close the WS server (sends close frames to
- *                   all connected clients before resolving).
+ * Handle returned by `attachWS`. Exposes the two operations `server.ts` needs:
+ *  - `broadcast` — push a JSON payload to all clients in a tenant room.
+ *  - `close`     — gracefully shut down the WS server.
  */
 export interface WsController {
   broadcast: (tenantId: string, payload: unknown) => void;
   close: () => void;
 }
 
+/** WebSocket extended with our liveness flag. */
+type LiveSocket = WebSocket & { isAlive: boolean };
+
+const PING_INTERVAL_MS = 30_000;
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
 /**
- * Attaches a WebSocket server to an existing `http.Server` instance so that
- * both HTTP and WS traffic share a single TCP port.
- *
- * Called in `server.ts` immediately after `server.listen()` resolves.
- *
- * @param _httpServer  The Node.js HTTP server created by `http.createServer(app)`.
- * @returns            A `WsController` with `broadcast` and `close` methods.
- *
- * @todo Phase 11 — replace stub body with full `ws` implementation.
+ * Attaches a WebSocket server to `httpServer` and returns a `WsController`.
+ * Must be called after `server.listen()` so the underlying TCP socket exists.
  */
-export function attachWS(_httpServer: Server): WsController {
-  // Phase 11: initialise `new WebSocketServer({ server: _httpServer })` here.
+export function attachWS(httpServer: Server): WsController {
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+
+  // tenantId → connected sockets
+  const rooms = new Map<string, Set<LiveSocket>>();
+  // tenantId → pubsub handler registered for that room
+  const roomHandlers = new Map<string, PubSubHandler>();
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  function broadcastToRoom(tenantId: string, payload: unknown): void {
+    const room = rooms.get(tenantId);
+    if (!room) return;
+    const message = JSON.stringify(payload);
+    for (const socket of room) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(message);
+      }
+    }
+  }
+
+  function removeFromRoom(tenantId: string, socket: LiveSocket): void {
+    const room = rooms.get(tenantId);
+    if (!room) return;
+    room.delete(socket);
+
+    if (room.size === 0) {
+      rooms.delete(tenantId);
+      const handler = roomHandlers.get(tenantId);
+      if (handler) {
+        unsubscribe(`incidents:${tenantId}`, handler);
+        roomHandlers.delete(tenantId);
+        logger.debug({ tenantId }, '[WS] Room empty — pubsub unsubscribed');
+      }
+    }
+  }
+
+  function ensureRoomSubscription(tenantId: string): void {
+    if (roomHandlers.has(tenantId)) return;
+    const handler: PubSubHandler = (payload) => {
+      broadcastToRoom(tenantId, payload);
+    };
+    subscribe(`incidents:${tenantId}`, handler);
+    roomHandlers.set(tenantId, handler);
+    logger.debug({ tenantId }, '[WS] Room created — pubsub subscribed');
+  }
+
+  // ── Connection handler ────────────────────────────────────────────────────
+
+  wss.on('connection', (rawSocket, req) => {
+    const socket = rawSocket as LiveSocket;
+    socket.isAlive = true;
+
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    const tenantId = url.searchParams.get('tenantId');
+
+    if (!tenantId) {
+      socket.close(1008, 'tenantId query parameter is required');
+      return;
+    }
+
+    if (!rooms.has(tenantId)) rooms.set(tenantId, new Set());
+    const room = rooms.get(tenantId) as Set<LiveSocket>;
+    room.add(socket);
+    ensureRoomSubscription(tenantId);
+
+    logger.debug({ tenantId, clients: room.size }, '[WS] Client connected');
+
+    socket.on('pong', () => {
+      socket.isAlive = true;
+    });
+
+    socket.on('close', () => {
+      removeFromRoom(tenantId, socket);
+      logger.debug({ tenantId }, '[WS] Client disconnected');
+    });
+
+    socket.on('error', (err) => {
+      logger.warn({ err, tenantId }, '[WS] Socket error');
+      removeFromRoom(tenantId, socket);
+    });
+  });
+
+  wss.on('error', (err) => {
+    logger.error({ err }, '[WS] WebSocketServer error');
+  });
+
+  // ── Ping / pong heartbeat ─────────────────────────────────────────────────
+
+  const heartbeat = setInterval(() => {
+    for (const room of rooms.values()) {
+      for (const socket of room) {
+        if (!socket.isAlive) {
+          socket.terminate();
+          continue;
+        }
+        socket.isAlive = false;
+        socket.ping();
+      }
+    }
+  }, PING_INTERVAL_MS);
+
+  heartbeat.unref(); // don't block process exit
+
+  // ── Controller ────────────────────────────────────────────────────────────
+
   return {
-    broadcast: () => {
-      /* Phase 11 */
-    },
-    close: () => {
-      /* Phase 11 */
+    broadcast: broadcastToRoom,
+
+    close(): void {
+      clearInterval(heartbeat);
+
+      for (const [tenantId, handler] of roomHandlers.entries()) {
+        unsubscribe(`incidents:${tenantId}`, handler);
+      }
+      roomHandlers.clear();
+
+      for (const room of rooms.values()) {
+        for (const socket of room) socket.terminate();
+      }
+      rooms.clear();
+
+      wss.close(() => {
+        logger.info('[WS] Server closed');
+      });
     },
   };
 }

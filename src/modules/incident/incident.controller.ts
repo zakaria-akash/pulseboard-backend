@@ -26,22 +26,11 @@
 
 import type { Request, Response, NextFunction } from 'express';
 import { sendSuccess, sendPaginated } from '../../common/http';
-import { subscribe, unsubscribe, type PubSubHandler } from '../../realtime/pubsub';
 import * as incidentService from './incident.service';
 import type { UpdateIncidentDto } from './incident.validation';
 import { parsePagination } from '../../common/paginate';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Writes one SSE event to the response and flushes. */
-function sseWrite(res: Response, data: unknown): void {
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-  // Express's compression middleware buffers output — flush ensures the event
-  // is delivered to the client immediately rather than batched.
-  if (typeof (res as { flush?: () => void }).flush === 'function') {
-    (res as { flush: () => void }).flush();
-  }
-}
+import { incidentSSE } from '../../realtime/sse';
+import { streamTimeline as streamTimelineChunkedImpl } from '../../realtime/stream';
 
 // ── Controllers ───────────────────────────────────────────────────────────────
 
@@ -96,88 +85,27 @@ export async function update(req: Request, res: Response, next: NextFunction): P
 /**
  * GET /incidents/:id/timeline/stream
  *
- * SSE endpoint: streams the incident timeline to the client.
- * Sends the current snapshot immediately, then forwards any
- * `incident:updated` / `incident:resolved` events for this incident.
+ * Streams the audit log for an incident as chunked JSON:
+ *   { "items": [ <auditEntry>, ... ] }
+ *
+ * Uses a Mongoose cursor for backpressure — documents are sent one at a time
+ * without buffering the full result set in memory. Delegates to stream.ts.
  *
  * Requires authentication (authGuard applied in routes).
  */
-export async function streamTimeline(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  const { tenantId } = req.user;
-  const { id } = req.params;
-
-  try {
-    // Establish the SSE connection before any async work.
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // disable Nginx proxy buffering
-    res.flushHeaders();
-
-    // Send the current timeline as the first event.
-    const timeline = await incidentService.getTimeline(tenantId, id);
-    sseWrite(res, { type: 'snapshot', ...timeline });
-
-    // Subscribe to tenant incident events and filter for this incident.
-    const channel = `incidents:${tenantId}`;
-    const handler: PubSubHandler = (payload) => {
-      const ev = payload as { event: string; incidentId?: string };
-      if (ev.incidentId === id) {
-        sseWrite(res, { type: 'event', ...ev });
-      }
-    };
-
-    subscribe(channel, handler);
-
-    // Clean up when the client disconnects.
-    req.on('close', () => {
-      unsubscribe(channel, handler);
-      res.end();
-    });
-  } catch (err) {
-    next(err);
-  }
+export async function streamTimeline(req: Request, res: Response): Promise<void> {
+  await streamTimelineChunkedImpl(req, res);
 }
 
 /**
  * GET /incidents/stream
  *
  * SSE endpoint: streams all incident lifecycle events for a tenant.
- * Intended for the public status page dashboard (no auth required).
+ * No auth required — designed for a public status page.
  * The `tenantId` is read from the `?tenantId=` query param.
  *
- * Each SSE message has the shape:
- *   data: { event: 'incident:opened'|'incident:resolved'|'incident:updated', ... }
+ * Delegates to sse.ts (incidentSSE) which handles heartbeats and cleanup.
  */
 export function streamFeed(req: Request, res: Response): void {
-  // For the public feed, tenantId comes from the query string.
-  // Authenticated routes use req.user.tenantId instead.
-  const tenantId = (req.query as Record<string, string>).tenantId;
-
-  if (!tenantId) {
-    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'tenantId is required' } });
-    return;
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  const channel = `incidents:${tenantId}`;
-  const handler: PubSubHandler = (payload) => {
-    sseWrite(res, payload);
-  };
-
-  subscribe(channel, handler);
-
-  req.on('close', () => {
-    unsubscribe(channel, handler);
-    res.end();
-  });
+  incidentSSE(req, res);
 }
