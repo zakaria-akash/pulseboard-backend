@@ -46,6 +46,7 @@ import { errorHandler } from './common/middleware/errorHandler';
 
 // ── Module routers (mounted as implemented) ───────────────────────────────────
 import authRouter from './modules/auth/auth.routes'; // Phase 4
+import tenantRouter from './modules/tenant/tenant.routes'; // Phase 5
 
 // ── App instance ─────────────────────────────────────────────────────────────
 const app: Application = express();
@@ -182,7 +183,9 @@ const apiRouter = express.Router();
 // Phase 4 — Auth: strict rate limit (10 req/min) on all /auth endpoints
 apiRouter.use('/auth', authLimiter, authRouter);
 
-// Phase 5  → tenantRouter  at /tenants
+// Phase 5 — Tenants: no extra rate limit; authGuard is applied per-route
+apiRouter.use('/tenants', tenantRouter);
+
 // Phase 6  → checkRouter   at /checks
 // Phase 8  → incidentRouter at /incidents
 // Phase 9  → auditRouter   at /audit

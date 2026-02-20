@@ -156,7 +156,7 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
     logger.info(`  Healthz  →  http://localhost:${env.PORT}/healthz`);
     logger.info(`  Readyz   →  http://localhost:${env.PORT}/readyz`);
     logger.info(`  Env      →  ${env.NODE_ENV}`);
-    logger.info(`  Phase    →  3  (app & server wiring)`);
+    logger.info(`  Phase    →  5  (tenant module)`);
     logger.info('');
   });
 })();

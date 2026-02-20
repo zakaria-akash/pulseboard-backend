@@ -14,6 +14,7 @@ This document defines the exact, ordered sequence of implementation steps. No st
 ### Steps
 
 1. **Install dependencies**
+
    ```bash
    npm install   # installs from package.json already created
    ```
@@ -35,9 +36,11 @@ This document defines the exact, ordered sequence of implementation steps. No st
    - `printWidth: 100`, `singleQuote: true`, `trailingComma: 'all'`, `semi: true`
 
 5. **Husky + lint-staged**
+
    ```bash
    npx husky init
    ```
+
    - Pre-commit hook: `npx lint-staged`
    - Pre-push hook: `npm run typecheck && npm test -- --passWithNoTests`
 
@@ -49,6 +52,7 @@ This document defines the exact, ordered sequence of implementation steps. No st
    - `collectCoverageFrom: ['src/**/*.ts']`
 
 7. **`.env` and `.env.example`**
+
    ```env
    NODE_ENV=development
    PORT=4000
@@ -59,9 +63,11 @@ This document defines the exact, ordered sequence of implementation steps. No st
    BCRYPT_ROUNDS=12
    CHECK_INTERVAL_MS=30000
    ```
+
    - Add `.env` to `.gitignore`; commit only `.env.example`
 
 8. **Create full `src/` directory skeleton** (empty files/folders, no logic yet)
+
    ```
    src/
      app.ts
@@ -119,6 +125,7 @@ This document defines the exact, ordered sequence of implementation steps. No st
    ```
 
 9. **Smoke-check Phase 0**
+
    ```bash
    npm run typecheck   # zero errors
    npm run lint        # zero errors
@@ -229,6 +236,7 @@ This document defines the exact, ordered sequence of implementation steps. No st
    - Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting, close WS, close DB
 
 3. **Smoke-test**
+
    ```bash
    npm run dev
    curl http://localhost:4000/healthz   # { "status": "ok" }
@@ -593,6 +601,7 @@ This document defines the exact, ordered sequence of implementation steps. No st
 ### Steps
 
 1. **CI pipeline steps (GitHub Actions or equivalent)**
+
    ```yaml
    - npm ci
    - npm run typecheck
