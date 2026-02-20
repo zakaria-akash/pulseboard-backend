@@ -109,10 +109,14 @@ async function handleProbeResult(check: CheckDoc, result: ProbeResult): Promise<
   if (prevOk !== false && !result.ok) {
     // Pass (or unknown) → Fail: open an incident.
     logger.warn({ checkId, tenantId }, `Check FAILED — ${check.url}`);
+    // 'probe:events' — consumed by incident service (Phase 8) to open incidents.
+    publish('probe:events', { event: 'check:fail', checkId, tenantId, result });
+    // 'incidents:{tenantId}' — consumed by WebSocket / SSE layer (Phase 11).
     publish(`incidents:${tenantId}`, { event: 'check:fail', checkId, tenantId, result });
   } else if (prevOk === false && result.ok) {
     // Fail → Pass: resolve the open incident.
     logger.info({ checkId, tenantId }, `Check RECOVERED — ${check.url}`);
+    publish('probe:events', { event: 'check:recover', checkId, tenantId, result });
     publish(`incidents:${tenantId}`, { event: 'check:recover', checkId, tenantId, result });
   }
   // Same state → no event (deduplication prevents duplicate incident creation).

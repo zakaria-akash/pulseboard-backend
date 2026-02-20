@@ -48,6 +48,8 @@ import { errorHandler } from './common/middleware/errorHandler';
 import authRouter from './modules/auth/auth.routes'; // Phase 4
 import tenantRouter from './modules/tenant/tenant.routes'; // Phase 5
 import checkRouter from './modules/check/check.routes'; // Phase 6
+import incidentRouter from './modules/incident/incident.routes'; // Phase 8
+import auditRouter from './modules/audit/audit.routes'; // Phase 9
 
 // ── App instance ─────────────────────────────────────────────────────────────
 const app: Application = express();
@@ -190,9 +192,13 @@ apiRouter.use('/tenants', tenantRouter);
 // Phase 6 — Checks: no extra rate limit; authGuard applied per-route
 apiRouter.use('/checks', checkRouter);
 
-// Phase 8  → incidentRouter at /incidents
-// Phase 9  → auditRouter   at /audit
-// Phase 10 → usageRouter   at /usage
+// Phase 8 — Incidents: no extra rate limit; authGuard applied per-route
+apiRouter.use('/incidents', incidentRouter);
+
+// Phase 9 — Audit: admin-only; authGuard applied per-route
+apiRouter.use('/audit', auditRouter);
+
+// Phase 10 → usageRouter at /usage
 
 app.use('/api/v1', apiRouter);
 
