@@ -49,6 +49,7 @@ import { env } from './config/env';
 import logger from './config/logger';
 import { connectDB, disconnectDB } from './config/db';
 import { attachWS, type WsController } from './realtime/ws';
+import { startScheduler } from './scheduler';
 
 // ── HTTP Server ───────────────────────────────────────────────────────────────
 // Wrapping app in http.createServer (rather than calling app.listen) lets us
@@ -59,6 +60,10 @@ const server = http.createServer(app);
 // Holds the WsController returned by attachWS. Populated after listen() so
 // the shutdown handler can close WebSocket connections gracefully.
 let wsController: WsController | null = null;
+
+// Holds the stopScheduler function returned by startScheduler(). Called in
+// the shutdown handler to cancel all probe timers before the process exits.
+let stopScheduler: (() => void) | null = null;
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
 /**
@@ -88,6 +93,10 @@ async function shutdown(signal: string): Promise<void> {
     clearTimeout(killTimer);
 
     logger.info('[PulseBoard] HTTP server closed');
+
+    // Stop all probe timers so no new HTTP requests fire after shutdown begins.
+    stopScheduler?.();
+    logger.info('[PulseBoard] Scheduler stopped');
 
     // Close WebSocket connections, sending close frames to all connected clients.
     // Phase 11 will make this asynchronous; for now the stub is a no-op.
@@ -129,6 +138,17 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
     //    underlying socket exists for the WS upgrade handshake.
     wsController = attachWS(server);
 
+    // 4. Start the probe scheduler — loads all enabled checks from DB and
+    //    begins periodic HTTP probing. Must run after listen() so the DB
+    //    connection is confirmed. Returns stopScheduler for graceful shutdown.
+    startScheduler()
+      .then((stop) => {
+        stopScheduler = stop;
+      })
+      .catch((err: unknown) => {
+        logger.error({ err }, '[PulseBoard] Scheduler failed to start');
+      });
+
     // ── Startup banner ────────────────────────────────────────────────────
     logger.info('');
     logger.info(
@@ -156,7 +176,7 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
     logger.info(`  Healthz  →  http://localhost:${env.PORT}/healthz`);
     logger.info(`  Readyz   →  http://localhost:${env.PORT}/readyz`);
     logger.info(`  Env      →  ${env.NODE_ENV}`);
-    logger.info(`  Phase    →  5  (tenant module)`);
+    logger.info(`  Phase    →  7  (checks + scheduler)`);
     logger.info('');
   });
 })();
