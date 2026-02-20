@@ -13,6 +13,12 @@ const config: Config = {
     '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }],
   },
 
+  // Node16 module resolution emits imports with `.js` extensions.
+  // ts-jest needs to map those back to the source `.ts` files at test time.
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
+
   moduleFileExtensions: ['ts', 'js', 'json'],
 
   // Coverage
@@ -26,6 +32,9 @@ const config: Config = {
   coverageThreshold: {
     global: { lines: 70, functions: 70, branches: 60, statements: 70 },
   },
+
+  // Run before each test file to populate process.env before env.ts is imported.
+  setupFiles: ['<rootDir>/tests/setup.ts'],
 
   testTimeout: 15000,
   verbose: true,

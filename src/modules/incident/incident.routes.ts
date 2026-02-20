@@ -4,11 +4,12 @@
  * Mounted at /api/v1/incidents in app.ts.
  *
  * Route order matters: Express matches routes top-to-bottom.
- * `/stream` must be declared BEFORE `/:id` or Express will interpret the
- * literal string "stream" as an :id parameter.
+ * `/stream` and `/export` must be declared BEFORE `/:id` or Express will
+ * interpret the literal strings as :id parameters.
  *
  * Routes:
  *   GET  /stream                   — SSE feed (no auth; tenantId from ?tenantId=)
+ *   GET  /export                   — authGuard('viewer') → CSV download
  *   GET  /                         — authGuard() → paginated list
  *   POST is not exposed — incidents are created automatically by the scheduler
  *   GET  /:id                      — authGuard() → single incident
@@ -28,6 +29,11 @@ const router = Router();
 // No auth — designed for a public status page. Tenant is identified by the
 // ?tenantId= query param. Must appear before /:id.
 router.get('/stream', incidentController.streamFeed);
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+// Must appear before /:id so Express doesn't treat "export" as an :id param.
+// authGuard('viewer') allows any authenticated user (viewer is the minimum role).
+router.get('/export', authGuard('viewer'), incidentController.exportIncidents);
 
 // ── Authenticated REST endpoints ──────────────────────────────────────────────
 
