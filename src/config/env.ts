@@ -27,17 +27,10 @@ import { z } from 'zod';
 // ── Schema ─────────────────────────────────────────────────────────────────
 const EnvSchema = z.object({
   // ── Runtime ──────────────────────────────────────────────────────────────
-  NODE_ENV: z
-    .enum(['development', 'test', 'production'])
-    .default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
   // ── Server ───────────────────────────────────────────────────────────────
-  PORT: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(65535)
-    .default(4000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(4000),
 
   // ── Database ─────────────────────────────────────────────────────────────
   /** Full MongoDB connection string, e.g. mongodb+srv://user:pass@cluster/db */
@@ -50,13 +43,8 @@ const EnvSchema = z.object({
   /** JWT lifetime accepted by the `jsonwebtoken` library, e.g. "15m", "7d" */
   JWT_TTL: z.string().default('15m'),
 
-  /** bcrypt cost factor — higher is slower but more secure (10–12 is typical) */
-  BCRYPT_ROUNDS: z.coerce
-    .number()
-    .int()
-    .min(4)
-    .max(31)
-    .default(10),
+  /** bcrypt cost factor — guide mandates ≥ 12; allow 4 in CI for fast test hashing */
+  BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(31).default(12),
 
   // ── CORS ─────────────────────────────────────────────────────────────────
   /** Comma-separated list of allowed origins, e.g. "http://localhost:3000" */
@@ -64,18 +52,10 @@ const EnvSchema = z.object({
 
   // ── Monitoring ───────────────────────────────────────────────────────────
   /** How often (ms) the scheduler fires HTTP checks against monitored targets */
-  CHECK_INTERVAL_MS: z.coerce
-    .number()
-    .int()
-    .min(1000)
-    .default(60_000),
+  CHECK_INTERVAL_MS: z.coerce.number().int().min(1000).default(60_000),
 
   /** Per-request timeout (ms) for outbound HTTP probes */
-  PROBE_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .min(100)
-    .default(10_000),
+  PROBE_TIMEOUT_MS: z.coerce.number().int().min(100).default(10_000),
 });
 
 // ── Derived TypeScript type ────────────────────────────────────────────────
