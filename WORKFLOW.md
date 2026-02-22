@@ -636,7 +636,73 @@ Phase 12  History Export              ← CSV streaming
 Phase 13  Tests                       ← full coverage
 Phase 14  Hardening & Polish          ← observability, graceful shutdown
 Phase 15  CI Gates                    ← pipeline, thresholds
+Phase 16  Production Hardening Additions ← compression, timeout, Swagger/OpenAPI docs
 ```
 
 > Each phase should build and lint-clean before moving to the next.
 > Real-time (Phase 11) must follow the Incident module (Phase 8) since it depends on the pubsub events established in Phase 7–8.
+
+---
+
+## Phase 16 — Production Hardening Additions
+
+**Goal:** Add response compression, request timeout protection, and interactive API documentation to improve performance, reliability, and developer experience.
+
+### Steps
+
+1. **Response compression (`src/app.ts`)**
+   - Add `compression` middleware (already installed: `npm install compression @types/compression`)
+   - Register at position 5 in the middleware stack — after `cors`, before `hpp`
+   - Gzip/deflate responses above 1 kB automatically
+   - Particularly beneficial for paginated JSON lists and streamed timelines
+
+2. **Request timeout middleware (`src/app.ts`)**
+   - Register immediately after `globalLimiter` (position 10 in stack)
+   - Use `res.setTimeout(30_000, callback)` — resets on every write, so it is SSE-safe
+   - Callback: respond `408 REQUEST_TIMEOUT` only if `!res.headersSent`
+   - The `headersSent` guard prevents double-responding on streaming/SSE connections
+
+3. **Swagger / OpenAPI Documentation**
+
+   **Install packages**
+
+   ```bash
+   npm install swagger-jsdoc swagger-ui-express
+   npm install -D @types/swagger-jsdoc @types/swagger-ui-express
+   ```
+
+   **`src/config/swagger.ts`** — OpenAPI specification
+   - `swaggerJsdoc(options)` reads `@swagger` JSDoc from route files at startup
+   - Define all reusable `components.schemas` inline (User, Check, Incident, etc.)
+   - Define `securitySchemes`: `cookieAuth` (HttpOnly cookie) + `bearerAuth` (JWT Bearer)
+   - Set `apis` array to point at all route files and `src/app.ts`
+
+   **`@swagger` JSDoc annotations in route files**
+   - Add OpenAPI path annotations to all routes in:
+     - `auth.routes.ts` — POST /register, POST /login, POST /logout, GET /me
+     - `tenant.routes.ts` — POST /, GET /
+     - `check.routes.ts` — GET /, POST /, GET /:id, PATCH /:id, DELETE /:id
+     - `incident.routes.ts` — GET /stream, GET /export, GET /, GET /:id, PATCH /:id, GET /:id/timeline/stream
+     - `audit.routes.ts` — GET /
+     - `usage.routes.ts` — POST /events
+   - Also add `@swagger` tags to `/healthz` and `/readyz` handlers in `src/app.ts`
+
+   **Mount in `src/app.ts`**
+   - Import `swaggerUi` and `swaggerSpec`
+   - Mount before health and API routes:
+
+     ```ts
+     app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+     app.get('/api/v1/docs.json', (_req, res) => res.send(swaggerSpec));
+     ```
+
+4. **Smoke-test Phase 16**
+
+   ```bash
+   npm run typecheck      # zero errors
+   npm run dev            # server starts
+   curl http://localhost:4000/api/v1/docs      # Swagger UI HTML
+   curl http://localhost:4000/api/v1/docs.json # Raw OpenAPI JSON
+   ```
+
+---

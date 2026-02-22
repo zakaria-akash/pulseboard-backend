@@ -15,6 +15,7 @@
    - [env.ts — Environment Variables](#51-envts--environment-variables)
    - [db.ts — Database Connection](#52-dbts--database-connection)
    - [logger.ts — Application Logging](#53-loggerts--application-logging)
+   - [swagger.ts — OpenAPI Specification](#54-swaggerts--openapi-specification)
 6. [Common Layer — Shared Building Blocks](#6-common-layer--shared-building-blocks)
    - [errors.ts — Error Types](#61-errorsts--error-types)
    - [http.ts — Response Envelopes](#62-httpts--response-envelopes)
@@ -303,6 +304,81 @@ logger.debug({ tenantId }, '[SSE] Client connected');
 ```
 
 The first argument can be an **object** containing extra context (like `{ err }` or `{ tenantId }`). This is called **structured logging** — instead of `"Error: connection refused"`, you get a searchable JSON field `err` that contains the full error object.
+
+---
+
+### 5.4 `swagger.ts` — OpenAPI Specification
+
+**File:** `src/config/swagger.ts`
+
+#### User perspective
+Developers who consume the PulseBoard API — whether on the frontend team or external integrators — can open a browser and see a live, interactive map of every endpoint: what parameters it accepts, what it returns, and what errors it can produce. No separate Postman collection to keep in sync; no word document to maintain manually.
+
+#### Developer perspective
+`swagger.ts` is the single source of truth for the OpenAPI 3.0 specification. It does two things:
+
+1. **Defines reusable schemas inline** — all `components.schemas` (User, Tenant, Check, Incident, AuditEntry, UsageEvent, etc.) and both security schemes (`cookieAuth`, `bearerAuth`) live here. Route files reference them by `$ref` to avoid repeating the same shape in a dozen places.
+
+2. **Scans route files at startup** — `swagger-jsdoc` reads `/** @swagger ... */` JSDoc comments from every route file listed in the `apis` array and merges them into the base definition. This approach keeps each route's documentation physically next to the route itself, making it almost impossible for docs to drift out of sync.
+
+```typescript
+const options: swaggerJsdoc.Options = {
+  definition: {
+    openapi: '3.0.0',
+    info: { title: 'PulseBoard API', version: '1.0.0' },
+    servers: [{ url: `http://localhost:${env.PORT}/api/v1` }],
+    components: {
+      securitySchemes: { cookieAuth: { ... }, bearerAuth: { ... } },
+      schemas: { User: { ... }, Check: { ... }, Incident: { ... }, ... },
+    },
+  },
+  apis: [
+    './src/app.ts',
+    './src/modules/auth/auth.routes.ts',
+    './src/modules/check/check.routes.ts',
+    // ... all route files
+  ],
+};
+
+export const swaggerSpec = swaggerJsdoc(options);
+```
+
+The exported `swaggerSpec` is a plain JavaScript object (the full OpenAPI JSON). It is consumed in `app.ts` in two ways:
+
+- `swaggerUi.setup(swaggerSpec)` — renders the interactive Swagger UI at `GET /api/v1/docs`
+- `res.send(swaggerSpec)` — serves the raw JSON at `GET /api/v1/docs.json` for Postman/Insomnia import
+
+#### Key concept — `@swagger` JSDoc in route files
+
+Every route file now contains annotations like this directly above each `router.xxx()` call:
+
+```typescript
+/**
+ * @swagger
+ * /checks:
+ *   get:
+ *     tags: [Checks]
+ *     summary: List checks for the current tenant (paginated)
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *     responses:
+ *       200:
+ *         description: Paginated list of checks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Check'
+ *       401:
+ *         $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get('/', authGuard(), validate(ListChecksQuerySchema), checkController.list);
+```
+
+At process startup, `swagger-jsdoc` parses all these YAML blocks from the JSDoc comments and merges them into the final spec. The developer sees the docs update immediately on the next `npm run dev` restart — no code generation step, no separate schema files.
 
 ---
 
@@ -678,23 +754,55 @@ Now TypeScript knows that `req.user.tenantId` is a `string`. If a controller tri
 #### Middleware order — why it matters
 
 ```
-1. requestId       Must be FIRST — every log line after needs the request ID
-2. requestLogger   Second — needs requestId to be set
-3. helmet          Security headers — before any content is served
-4. cors            Must handle OPTIONS preflight before body parsing
-5. compression     After CORS headers are set
-6. hpp             Sanitise duplicate query params before handlers read them
-7. json parser     Parse request body before validators or controllers
-8. cookieParser    Parse cookies before authGuard reads req.cookies.token
-9. globalLimiter   After parsing so the limiter can read client identity
+ 1. requestId        Must be FIRST — every log line after needs the request ID
+ 2. requestLogger    Second — needs requestId to be set
+ 3. helmet           Security headers — before any content is served
+ 4. cors             Must handle OPTIONS preflight before body parsing
+ 5. compression      Gzip/deflate responses after CORS headers are set
+ 6. hpp              Sanitise duplicate query params before handlers read them
+ 7. json parser      Parse request body before validators or controllers
+ 8. cookieParser     Parse cookies before authGuard reads req.cookies.token
+ 9. globalLimiter    After parsing so the limiter can read client identity
+10. requestTimeout   30 s socket idle limit; resets on every write (SSE-safe)
+── docs ──
+11. /api/v1/docs     Swagger UI + /api/v1/docs.json raw spec
 ── routes ──
-10. /healthz /readyz  No auth, no versioning, no rate limit
-11. /api/v1 router    All versioned application routes
-12. 404 handler       Catches any unmatched routes
-13. errorHandler      MUST be last — handles all next(err) calls
+12. /healthz /readyz   No auth, no versioning, no rate limit
+13. /api/v1 router     All versioned application routes
+14. 404 handler        Catches any unmatched routes
+15. errorHandler       MUST be last — handles all next(err) calls
 ```
 
 Each step depends on the previous. If `cookieParser` ran before `requestId`, the request ID would be absent in cookie-related log entries. If `globalLimiter` ran before `json parser`, the limiter could not read a JSON body to extract client identity.
+
+#### Request timeout (step 10)
+
+```typescript
+app.use((_req, res, next) => {
+  res.setTimeout(30_000, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ error: { code: 'REQUEST_TIMEOUT', message: 'Request timed out after 30 s' } });
+    }
+  });
+  next();
+});
+```
+
+`res.setTimeout()` sets a **socket-level** idle timer that resets every time any data is written to the response. This makes it inherently safe for long-lived connections:
+
+- **Normal REST requests** complete in milliseconds — the timer never fires.
+- **SSE connections** send a `:keep-alive` comment every 20 seconds — the timer resets every 20 s and never fires.
+- **Streaming responses** reset the timer with each chunk — only fires if the Mongoose cursor stalls for 30 s.
+- **Timeout fires** → if `res.headersSent` is `false` (normal request), respond `408`. If `true` (SSE/streaming already started), silently do nothing.
+
+#### Swagger UI (step 11)
+
+```typescript
+app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.get('/api/v1/docs.json', (_req, res) => res.send(swaggerSpec));
+```
+
+The Swagger UI is mounted **outside** the versioned `apiRouter` so it can serve its own CSS, JS, and image assets cleanly without being subject to version-prefix routing. It is also not behind `authGuard` — it is public documentation. The raw JSON endpoint at `/api/v1/docs.json` allows one-click import into Postman (`File → Import → Link`) or Insomnia.
 
 #### The `/api/v1` router
 
@@ -2056,4 +2164,4 @@ The p50/p95 latency tracker in `requestLogger.ts` logs to the application log. F
 
 ---
 
-*This document covers every file in the PulseBoard backend as of Phase 15. As the codebase evolves, update the relevant section to keep this document in sync.*
+*This document covers every file in the PulseBoard backend as of Phase 16. As the codebase evolves, update the relevant section to keep this document in sync.*

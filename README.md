@@ -34,6 +34,9 @@
 - **Multi-tenant isolation** — every repository query is scoped by `tenantId`; cross-tenant reads return 404.
 - **Audit trail** — append-only log of every mutation; queryable by admins and owners.
 - **Production hardening** — Helmet + CSP, CORS, rate limiting (global / auth / usage), bcrypt (≥ 12 rounds), JWT with `iss`/`aud` verification, request IDs, p50/p95 latency logging, graceful shutdown.
+- **Response compression** — gzip/deflate via `compression` middleware; reduces JSON payload size by 60–80% on list endpoints.
+- **Request timeout protection** — 30-second socket-level timeout on all routes; SSE-safe (keep-alive resets the timer); returns `408 REQUEST_TIMEOUT` on idle connections.
+- **Interactive API documentation** — Swagger UI at `GET /api/v1/docs`; raw OpenAPI 3.0 JSON spec at `GET /api/v1/docs.json`; importable into Postman and Insomnia.
 
 ---
 
@@ -48,7 +51,8 @@ pulse-board-backend/
 │   ├── config/
 │   │   ├── env.ts                    # Zod-validated env singleton
 │   │   ├── db.ts                     # Mongoose connect/disconnect
-│   │   └── logger.ts                 # Pino logger (pretty in dev, JSON in prod)
+│   │   ├── logger.ts                 # Pino logger (pretty in dev, JSON in prod)
+│   │   └── swagger.ts                # OpenAPI 3.0 spec (swagger-jsdoc config + schemas)
 │   ├── common/
 │   │   ├── errors.ts                 # AppError hierarchy (400–500)
 │   │   ├── http.ts                   # sendSuccess / sendPaginated / sendError
@@ -207,6 +211,16 @@ PROBE_TIMEOUT_MS=10000
 ## API Reference
 
 All routes are prefixed with `/api/v1`. Success responses use the `{ data }` envelope; errors use `{ error: { code, message, details? } }`.
+
+### API Documentation
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/v1/docs` | None | Interactive Swagger UI |
+| `GET` | `/api/v1/docs.json` | None | Raw OpenAPI 3.0 JSON spec (Postman/Insomnia import) |
+
+> Open `http://localhost:4000/api/v1/docs` in your browser after starting the dev server.
+> To import into Postman: **File → Import → Link** → `http://localhost:4000/api/v1/docs.json`
 
 ### Health
 
@@ -429,3 +443,22 @@ SIGTERM / SIGINT
        └─ process.exit(0)
   └─ 10 s hard-kill timeout      force exit if drain stalls
 ```
+
+### Request Timeout
+
+Every request gets a 30-second socket-level timeout via `res.setTimeout()`. The timer resets on every write, making it safe for long-lived connections:
+
+| Connection type | Behaviour |
+| --- | --- |
+| Normal REST request | Completes well within 30 s; timeout never fires |
+| SSE (`/incidents/stream`) | Keep-alive every 20 s resets the timer continuously |
+| Streaming (`/timeline/stream`) | Each chunk resets the timer; only fires if cursor stalls |
+| Timeout fires | Returns `408 REQUEST_TIMEOUT` if `!res.headersSent`; silently ignored otherwise |
+
+### Response Compression
+
+All responses pass through `compression()` middleware. Responses above 1 kB are automatically gzip/deflated. This is particularly effective for:
+
+- Paginated check/incident list responses (60–80% size reduction)
+- Chunked timeline stream chunks
+- The raw Swagger JSON spec

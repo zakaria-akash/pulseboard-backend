@@ -16,28 +16,35 @@
  * Express executes middleware in registration order. The stack below is arranged
  * so that each layer builds on what the previous one provides:
  *
- *   1. requestId     — attach X-Request-Id before anything can log or error
- *   2. helmet        — set security headers before any content is served
- *   3. cors          — handle preflight OPTIONS before body parsing
- *   4. compression   — compress after CORS headers are set
- *   5. hpp           — sanitise query params before any handler reads them
- *   6. json / urlencoded — parse bodies before route handlers or validators
- *   7. cookieParser  — parse cookies before authGuard reads req.cookies.token
- *   8. globalLimiter — rate-limit after parsing so we can read client identity
+ *   1. requestId      — attach X-Request-Id before anything can log or error
+ *   2. requestLogger  — structured access log + p50/p95 latency tracker
+ *   3. helmet         — set security headers before any content is served
+ *   4. cors           — handle preflight OPTIONS before body parsing
+ *   5. compression    — gzip/deflate responses after CORS headers are set
+ *   6. hpp            — sanitise query params before any handler reads them
+ *   7. json / urlencoded — parse bodies before route handlers or validators
+ *   8. cookieParser   — parse cookies before authGuard reads req.cookies.token
+ *   9. globalLimiter  — rate-limit after parsing so we can read client identity
+ *  10. requestTimeout — 30 s socket timeout; resets on every write (SSE-safe)
+ *   ── docs ──
+ *  11. /api/v1/docs   — Swagger UI (interactive) + /api/v1/docs.json (raw spec)
  *   ── routes ──
- *   9. /healthz, /readyz — outside /api/v1, no auth, no versioning
- *  10. /api/v1 router   — all versioned API routes
- *  11. 404 handler      — catches unmatched routes
- *  12. errorHandler     — MUST be last; handles all next(err) calls
+ *  12. /healthz, /readyz — outside /api/v1, no auth, no versioning
+ *  13. /api/v1 router    — all versioned API routes
+ *  14. 404 handler       — catches unmatched routes
+ *  15. errorHandler      — MUST be last; handles all next(err) calls
  */
 
-import express, { type Application, type Request, type Response } from 'express';
+import express, { type Application, type Request, type Response, type NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 import hpp from 'hpp';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
+import swaggerUi from 'swagger-ui-express';
+
+import { swaggerSpec } from './config/swagger';
 
 import { env } from './config/env';
 import { requestId } from './common/middleware/requestId';
@@ -133,17 +140,95 @@ app.use(express.urlencoded({ extended: false }));
 // req.cookies.token for HttpOnly JWT authentication.
 app.use(cookieParser());
 
-// ── 8. Global rate limiter ────────────────────────────────────────────────────
+// ── 9. Global rate limiter ────────────────────────────────────────────────────
 // Applied to every route: 200 requests/minute per IP.
 // Route-specific limiters (authLimiter, usageLimiter) are applied at the
 // router level in their respective route files.
 app.use(globalLimiter);
+
+// ── 10. Request timeout ───────────────────────────────────────────────────────
+// Sets a 30-second socket-level timeout on every request. The callback fires
+// only if no data has been written to the socket for 30 consecutive seconds.
+//
+// This is safe for SSE and streaming routes because:
+//   - SSE sends ':keep-alive\n\n' every 20 s → timer resets every 20 s
+//   - Streaming (chunked JSON) resets the timer with every chunk written
+//
+// The `res.headersSent` guard prevents a double-respond on SSE/streaming
+// connections where the response has already started when a timeout fires
+// (e.g., a cursor stalled mid-stream).
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setTimeout(30_000, () => {
+    if (!res.headersSent) {
+      res.status(408).json({
+        error: { code: 'REQUEST_TIMEOUT', message: 'Request timed out after 30 s' },
+      });
+    }
+  });
+  next();
+});
+
+// ── 11. Swagger / OpenAPI documentation ──────────────────────────────────────
+// Served at /api/v1/docs (interactive UI) and /api/v1/docs.json (raw spec).
+// Not behind authGuard — it is public documentation. Not behind the versioned
+// apiRouter so it can serve its own static assets (CSS, JS) cleanly.
+//
+// The raw JSON spec endpoint is useful for importing into Postman / Insomnia:
+//   File → Import → Link → http://localhost:4000/api/v1/docs.json
+app.use('/api/v1/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+/**
+ * @swagger
+ * /docs.json:
+ *   get:
+ *     tags: [Health]
+ *     summary: Download the raw OpenAPI JSON spec
+ *     description: Import into Postman (File → Import → Link) or Insomnia.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: OpenAPI 3.0 JSON specification
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ */
+app.get('/api/v1/docs.json', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
 
 // ── Health probes ─────────────────────────────────────────────────────────────
 // Mounted outside /api/v1 — no versioning, no auth, no rate-limit overhead
 // beyond the global limiter above. These are called frequently by orchestrators
 // and must return quickly.
 
+/**
+ * @swagger
+ * /healthz:
+ *   get:
+ *     tags: [Health]
+ *     summary: Liveness probe — is the process alive?
+ *     description: >
+ *       Always returns 200 as long as the Node.js process is running.
+ *       Container orchestrators (Kubernetes, ECS) restart the pod if this fails.
+ *       **Never** contains a DB check — a slow database must not kill the process.
+ *     security: []
+ *     servers:
+ *       - url: http://localhost:4000
+ *         description: Root server (health probes are outside /api/v1)
+ *     responses:
+ *       200:
+ *         description: Process is alive
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ */
 /**
  * GET /healthz — Liveness probe
  *
@@ -156,6 +241,48 @@ app.get('/healthz', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok' });
 });
 
+/**
+ * @swagger
+ * /readyz:
+ *   get:
+ *     tags: [Health]
+ *     summary: Readiness probe — is the app ready to serve traffic?
+ *     description: >
+ *       Checks the Mongoose connection state. Returns 503 while MongoDB is
+ *       connecting on cold start, giving load balancers time to wait.
+ *       Mongoose readyState values: 0=disconnected, 1=connected, 2=connecting, 3=disconnecting.
+ *     security: []
+ *     servers:
+ *       - url: http://localhost:4000
+ *         description: Root server (health probes are outside /api/v1)
+ *     responses:
+ *       200:
+ *         description: App is ready — MongoDB connected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: ok
+ *                 db:
+ *                   type: string
+ *                   example: connected
+ *       503:
+ *         description: App is not ready — MongoDB disconnected or connecting
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   example: fail
+ *                 db:
+ *                   type: string
+ *                   example: disconnected
+ */
 /**
  * GET /readyz — Readiness probe
  *

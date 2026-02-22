@@ -34,10 +34,88 @@ import * as tenantController from './tenant.controller';
 
 const router = Router();
 
+/**
+ * @swagger
+ * /tenants:
+ *   post:
+ *     tags: [Tenants]
+ *     summary: Create a new tenant (admin or owner only)
+ *     description: >
+ *       Creates a new workspace and automatically adds the requesting user as
+ *       an `owner` member. Requires `admin` role or higher.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateTenantRequest'
+ *     responses:
+ *       201:
+ *         description: Tenant created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   $ref: '#/components/schemas/Tenant'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Insufficient role — requires admin or owner
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       409:
+ *         description: Slug already taken
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 // POST /api/v1/tenants — admin-only tenant creation
 // authGuard('admin') → validate(CreateTenantSchema) → tenantController.create
 router.post('/', authGuard('admin'), validate(CreateTenantSchema), tenantController.create);
 
+/**
+ * @swagger
+ * /tenants:
+ *   get:
+ *     tags: [Tenants]
+ *     summary: List tenants the current user belongs to
+ *     description: >
+ *       Returns all tenants in which the authenticated user holds a membership.
+ *       Used to populate tenant-switcher UIs in the frontend.
+ *     responses:
+ *       200:
+ *         description: List of tenants
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Tenant'
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
 // GET /api/v1/tenants — list tenants the requesting user belongs to
 // authGuard() → tenantController.list
 router.get('/', authGuard(), tenantController.list);

@@ -153,6 +153,46 @@ Supertest cannot hold open a streaming response, so these tests use Node's built
 
 ---
 
+## Testing the New Endpoints
+
+### Swagger UI (`GET /api/v1/docs`)
+
+The Swagger UI can be verified with a simple supertest assertion:
+
+```ts
+import request from 'supertest';
+import app from '../../src/app';
+
+it('serves Swagger UI at /api/v1/docs', async () => {
+  const res = await request(app).get('/api/v1/docs/');
+  expect(res.status).toBe(200);
+  expect(res.headers['content-type']).toMatch(/html/);
+});
+
+it('serves raw OpenAPI spec at /api/v1/docs.json', async () => {
+  const res = await request(app).get('/api/v1/docs.json');
+  expect(res.status).toBe(200);
+  expect(res.body.openapi).toBe('3.0.0');
+  expect(res.body.info.title).toBe('PulseBoard API');
+});
+```
+
+### Request Timeout (408)
+
+The 30-second timeout is not practical to test in normal Jest runs (`--testTimeout` default is 5 s). Verify manually with a slow endpoint simulation, or stub `res.setTimeout` in unit tests. The important assertion is that `!res.headersSent` prevents double-responds on streaming connections.
+
+### Response Compression
+
+Supertest does not decompress gzip by default. To verify compression is active:
+
+```bash
+curl -H "Accept-Encoding: gzip" -I http://localhost:4000/api/v1/checks \
+  -H "Authorization: Bearer <token>"
+# Look for: Content-Encoding: gzip
+```
+
+---
+
 ## Seed Data
 
 `tests/fixtures/seed.ts` creates the following documents in the in-memory database on every `setup()` call:
